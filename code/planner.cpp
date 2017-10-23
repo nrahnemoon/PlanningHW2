@@ -5,6 +5,7 @@
  *=================================================================*/
 #include <math.h> // for pow, sqrt, round
 #include <map>
+#include <queue>
 #include <stdlib.h> // for rand
 #include <vector>
 #include "mex.h"
@@ -711,9 +712,12 @@ static void plannerRRTStar(double* worldMap, int x_size, int y_size,
 
 struct PRMNode {
     double* joint;
-    vector<PRMNode*> neighbors;
+    vector<PRMNode*>* neighbors;
     int connectedToStart;
     int connectedToGoal;
+
+    PRMNode* neighborToStart;
+    int nodeNum;
 };
 
 static void getNearPRMNodes(double* joint, vector<PRMNode*>* nodes, vector<PRMNode*>* nearNodes, vector<double>* nearNodeDistances, double radius, int numofDOFs) {
@@ -725,10 +729,11 @@ static void getNearPRMNodes(double* joint, vector<PRMNode*>* nodes, vector<PRMNo
         for (int j = 0; j < numofDOFs; j++) {
             currNeighborDistance += pow(fabs(neighborJoint[j] - joint[j]), 2);
         }
-        //printf("***neighborJoint is , [%f, %f, %f, %f, %f]\n",
-        //            neighborJoint[0], neighborJoint[1], neighborJoint[2], neighborJoint[3], neighborJoint[4]);
+        
         if (currNeighborDistance <= radius) {
             nearNodes->push_back(neighbor);
+            //printf("Added neighbor [%f, %f, %f, %f, %f]\n",
+            //    neighbor->joint[0], neighbor->joint[1], neighbor->joint[2], neighbor->joint[3], neighbor->joint[4]);
             nearNodeDistances->push_back(sqrt(currNeighborDistance));
         }
     }
@@ -739,8 +744,8 @@ static int propagateStartGoalConnected(PRMNode* node) {
     PRMNode* currNeighbor;
     int currNeighborConnectedToStart;
     int currNeighborConnectedToGoal;
-    for (int i = 0; i < node->neighbors.size(); i++) {
-        currNeighbor = node->neighbors[i];
+    for (int i = 0; i < node->neighbors->size(); i++) {
+        currNeighbor = (*(node->neighbors))[i];
         currNeighborConnectedToStart = currNeighbor->connectedToStart;
         currNeighborConnectedToGoal = currNeighbor->connectedToGoal;
         currNeighbor->connectedToStart = (currNeighbor->connectedToStart || node->connectedToStart);
@@ -772,14 +777,16 @@ static void plannerPRM(double* worldMap, int x_size, int y_size,
     startNode->joint = armstart_anglesV_rad;
     startNode->connectedToStart = 1;
     startNode->connectedToGoal = 0;
-    startNode->neighbors = vector<PRMNode*>();
+    startNode->neighbors = new vector<PRMNode*>();
+    startNode->nodeNum = 1;
     nodes->push_back(startNode);
 
     PRMNode* goalNode = (PRMNode*) malloc(sizeof(PRMNode));
     goalNode->joint = armgoal_anglesV_rad;
     goalNode->connectedToStart = 0;
     goalNode->connectedToGoal = 1;
-    goalNode->neighbors = vector<PRMNode*>();
+    goalNode->neighbors = new vector<PRMNode*>();
+    goalNode->nodeNum = -1;
     nodes->push_back(goalNode);
 
     double* currJoint;
@@ -788,8 +795,8 @@ static void plannerPRM(double* worldMap, int x_size, int y_size,
         generateRandomJoint(&currJoint, numofDOFs);
         if(!IsValidArmConfiguration(currJoint, numofDOFs, worldMap, x_size, y_size))
             continue;
-        printf("currJoint is , [%f, %f, %f, %f, %f]\n",
-            currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
+        //printf("currJoint is , [%f, %f, %f, %f, %f]\n",
+        //    currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
 
         vector<PRMNode*>* nearNodes = new vector<PRMNode*>();
         vector<double>* nearNodeDistances = new vector<double>();
@@ -801,26 +808,61 @@ static void plannerPRM(double* worldMap, int x_size, int y_size,
         currNode->joint = currJoint;
         currNode->connectedToStart = 0;
         currNode->connectedToGoal = 0;
-        currNode->neighbors = vector<PRMNode*>();
+        currNode->neighbors = new vector<PRMNode*>();
+        currNode->nodeNum = -1;
         nodes->push_back(currNode);
-        printf("currNode added to nodes\n");
+        // printf("currNode added to nodes\n");
 
         PRMNode* neighbor;
         double neighborDistance;
         for(int i = 0; i < nearNodes->size(); i++) {
             neighbor = (*nearNodes)[i];
             neighborDistance = (*nearNodeDistances)[i];
-            printf("neighbor is , [%f, %f, %f, %f, %f]\n",
-                neighbor[0], neighbor[1], neighbor[2], neighbor[3], neighbor[4]);
+            //printf("neighbor is , [%f, %f, %f, %f, %f]\n",
+            //    neighbor->joint[0], neighbor->joint[1], neighbor->joint[2], neighbor->joint[3], neighbor->joint[4]);
             if(!isJointTransitionValid(neighborDistance, discretizationStep, numofDOFs, currNode->joint, neighbor->joint, worldMap, x_size, y_size))
                 continue;
-            neighbor->neighbors.push_back(currNode);
-            currNode->neighbors.push_back(neighbor);
+            neighbor->neighbors->push_back(currNode);
+            currNode->neighbors->push_back(neighbor);
         }
         if (propagateStartGoalConnected(currNode))
             break;
     }
     printf("Start goal connected!  %d nodes expanded!", nodes->size());
+    
+    queue<PRMNode*> prmQueue;
+    prmQueue.push(startNode);
+            
+    PRMNode* currNode;
+    while(prmQueue.size() != 0) {
+        currNode = prmQueue.front();
+        prmQueue.pop();
+        if (currNode == goalNode) {
+            printf("Found path to goalNode!\n");
+            break;
+        }
+        PRMNode* neighbor;
+        for(int i = 0; i < currNode->neighbors->size(); i++) {
+            neighbor = (*(currNode->neighbors))[i];
+            if (neighbor->nodeNum == -1) {
+                neighbor->neighborToStart = currNode;
+                neighbor->nodeNum = currNode->nodeNum + 1;
+                prmQueue.push(neighbor);
+            }
+        }
+    }
+
+    *plan = (double**) malloc(currNode->nodeNum * sizeof(double*));
+    *planlength = currNode->nodeNum;
+
+    printf("Path has %d nodes and %d total nodes were generated.\n", *planlength, nodes->size());
+    for (int i = *planlength - 1; i >= 0; i--) {
+        (*plan)[i] = (double*) malloc(numofDOFs * sizeof(double));
+        for(int j = 0; j < numofDOFs; j++){
+            (*plan)[i][j] = currNode->joint[j];
+        }
+        currNode = currNode->neighborToStart;
+    }
 }
 //prhs contains input parameters (3): 
 //1st is matrix with all the obstacles
