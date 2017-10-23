@@ -252,34 +252,11 @@ struct Node {
     double* joint;
     Node* parent;
     int nodeNum;
-    int cost;
+    double cost;
 };
 
 static int getAngleDiscretizationFactor(int numofDOFs) {
     return round((2 * PI) / (2 * asin(sqrt(2)/(2 * LINKLENGTH_CELLS * numofDOFs))));
-}
-
-// Given currJoint and joints (all the existing joints),
-// sets closestNeighbor to the joint within joints that's closest to currJoint
-// and also returns the distance between closestNeighbor and currJoint
-double getClosestNeighbor(double* currJoint, vector<double*>* joints, int numofDOFs, double** closestNeighbor) {
-
-    double closestNeighborDistance = (pow(2 * PI, 2) * numofDOFs);
-
-    for (int i = 0; i < joints->size(); i++) {
-        double* neighborJoint = (*joints)[i];
-        double currNeighborDistance = 0;
-        for (int j = 0; j < numofDOFs; j++) {
-            currNeighborDistance += pow(fabs(neighborJoint[j] - currJoint[j]), 2);
-        }
-        //printf("***neighborJoint is , [%f, %f, %f, %f, %f]\n",
-        //            neighborJoint[0], neighborJoint[1], neighborJoint[2], neighborJoint[3], neighborJoint[4]);
-        if(currNeighborDistance < closestNeighborDistance) {
-            *closestNeighbor = neighborJoint;
-            closestNeighborDistance = currNeighborDistance;
-        }
-    }
-    return sqrt(closestNeighborDistance);
 }
 
 // Given currJoint and joints (all the existing joints),
@@ -306,6 +283,36 @@ double getClosestNeighborFromTree(double* currJoint, vector<Node*>* tree, int nu
     return sqrt(closestNeighborDistance);
 }
 
+// Given currJoint and joints (all the existing joints),
+// sets closestNeighbor to the joint within joints that's closest to currJoint
+// and also returns the distance between closestNeighbor and currJoint
+double getClosestNeighborFromTreeAndNearNodes(double* currJoint, vector<Node*>* tree, int numofDOFs, Node** closestNeighbor,
+        vector<Node*>* nearNodes, vector<double>* nearNodeDistances, double radius) {
+
+    radius = pow(radius, 2);
+    double closestNeighborDistance = (pow(2 * PI, 2) * numofDOFs);
+
+    for (int i = 0; i < tree->size(); i++) {
+        Node* neighbor = (*tree)[i];
+        double* neighborJoint = neighbor->joint;
+        double currNeighborDistance = 0;
+        for (int j = 0; j < numofDOFs; j++) {
+            currNeighborDistance += pow(fabs(neighborJoint[j] - currJoint[j]), 2);
+        }
+        //printf("***neighborJoint is , [%f, %f, %f, %f, %f]\n",
+        //            neighborJoint[0], neighborJoint[1], neighborJoint[2], neighborJoint[3], neighborJoint[4]);
+        if(currNeighborDistance < closestNeighborDistance) {
+            *closestNeighbor = neighbor;
+            closestNeighborDistance = currNeighborDistance;
+        }
+        if (currNeighborDistance <= radius) {
+            nearNodes->push_back(neighbor);
+            nearNodeDistances->push_back(sqrt(currNeighborDistance));
+        }
+    }
+    return sqrt(closestNeighborDistance);
+}
+
 static int isJointTransitionValid(double distance, double discretizationStep, int numofDOFs, double* currJoint, double* closestNeighbor,
         double* worldMap, int x_size, int y_size) {
     double* tempJoint = (double*) malloc(numofDOFs * sizeof(double));
@@ -321,6 +328,12 @@ static int isJointTransitionValid(double distance, double discretizationStep, in
     return 1;
 }
 
+static void generateRandomJoint(double** joint, int numofDOFs) {
+    for (int i = 0; i < numofDOFs; i++) {
+        (*joint)[i] = (rand() / (RAND_MAX/(2 * PI )));
+    }
+}
+
 static void plannerRRT(double* worldMap, int x_size, int y_size,
         double* armstart_anglesV_rad, double* armgoal_anglesV_rad, int numofDOFs,
         double*** plan, int* planlength) {
@@ -334,16 +347,16 @@ static void plannerRRT(double* worldMap, int x_size, int y_size,
     double epsilon = PI/4;
     //printf("Discretization factor is %d and epsilon is %f\n", discretizationFactor, epsilon);
 
-    vector<double*> joints;
-    map <double*, double*> jointParents;
-    map <double*, int> jointPathLength;
-    joints.push_back(armstart_anglesV_rad);
-    jointParents[armstart_anglesV_rad] = 0;
-    jointPathLength[armstart_anglesV_rad] = 1;
-    //printf("Pushed back start node\n");
+	Node* startNode = (Node*) malloc(sizeof(Node));
+    startNode->joint = armstart_anglesV_rad;
+    startNode->parent = 0;
+    startNode->nodeNum = 1;
+    vector<Node*>* nodes = new vector<Node*>();
+    nodes->push_back(startNode);
+    printf("Created startTree and added startNode to it.\n");
 
     double* currJoint;
-    double* closestNeighbor;
+    Node* closestNeighbor;
     int isGoalJoint = 0;
     while (1) {
         if (rand() % 2 == 1) {
@@ -352,20 +365,16 @@ static void plannerRRT(double* worldMap, int x_size, int y_size,
                 currJoint[i] = armgoal_anglesV_rad[i];
             }
             isGoalJoint = 1;
-            //printf("currJoint is goal node, [%f, %f, %f, %f, %f]\n",
-            //        currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
         } else {
             currJoint = (double*) malloc(numofDOFs * sizeof(double));
-            for (int i = 0; i < numofDOFs; i++) {
-                currJoint[i] = (rand() / (RAND_MAX/(2 * PI )));
-            }
-            //printf("currJoint is random, [%f, %f, %f, %f, %f]\n",
-            //        currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
+            generateRandomJoint(&currJoint, numofDOFs);
             isGoalJoint = 0;
         }
+        if(!IsValidArmConfiguration(currJoint, numofDOFs, worldMap, x_size, y_size))
+            continue;
 
         // Calculate closest neighbor
-        double closestNeighborDistance = getClosestNeighbor(currJoint, &joints, numofDOFs, &closestNeighbor);
+        double closestNeighborDistance = getClosestNeighborFromTree(currJoint, nodes, numofDOFs, &closestNeighbor);
         //printf("closestNeighbor to currNode is, [%f, %f, %f, %f, %f]\n",
         //            closestNeighbor[0], closestNeighbor[1], closestNeighbor[2], closestNeighbor[3], closestNeighbor[4]);
         //printf("Distance between closestNeighbor and currNode is %f\n", closestNeighborDistance);
@@ -373,7 +382,7 @@ static void plannerRRT(double* worldMap, int x_size, int y_size,
         if (closestNeighborDistance > epsilon) {
             isGoalJoint = 0;
             for (int j = 0; j < numofDOFs; j++) {
-                currJoint[j] = closestNeighbor[j] + epsilon * ((currJoint[j] - closestNeighbor[j])/closestNeighborDistance);
+                currJoint[j] = closestNeighbor->joint[j] + epsilon * ((currJoint[j] - closestNeighbor->joint[j])/closestNeighborDistance);
             }
             closestNeighborDistance = epsilon;
             //printf("Distance was greater than epsilon(%f), so updated currJoint to [%f, %f, %f, %f, %f]\n",
@@ -381,29 +390,30 @@ static void plannerRRT(double* worldMap, int x_size, int y_size,
         }
         
         int jointTransitionValid = isJointTransitionValid(closestNeighborDistance, discretizationStep, numofDOFs,
-                currJoint, closestNeighbor, worldMap, x_size, y_size);
+                currJoint, closestNeighbor->joint, worldMap, x_size, y_size);
         
         if (jointTransitionValid) {
-            joints.push_back(currJoint);
-            jointParents[currJoint] = closestNeighbor;
-            jointPathLength[currJoint] = jointPathLength[closestNeighbor] + 1;
+            Node* currNode = (Node*) malloc(sizeof(Node));
+            currNode->joint = currJoint;
+            currNode->parent = closestNeighbor;
+            currNode->nodeNum = closestNeighbor->nodeNum + 1;
+            nodes->push_back(currNode);
 
-            if (joints.size() % 100 == 0) {
-                printf("currJoint was valid, so added it to lists -- there are now %d nodes.\n", joints.size());
+            if (nodes->size() % 100 == 0) {
+                printf("currJoint was valid, so added it to lists -- there are now %d nodes.\n", nodes->size());
             }
             if (isGoalJoint) {
                 //printf("Reached goalJoint -- building plan of length %d.\n", jointPathLength[currJoint]);
-                *plan = (double**) malloc(jointPathLength[currJoint] * sizeof(double*));
-                *planlength = jointPathLength[currJoint];
-                
-                for (int i = jointPathLength[currJoint] - 1; i >= 0; i--) {
-                    (*plan)[i] = (double*) malloc(numofDOFs*sizeof(double));
+                *plan = (double**) malloc(currNode->nodeNum * sizeof(double*));
+                *planlength = currNode->nodeNum;
+
+                printf("Path has %d nodes\n", *planlength);
+                for (int i = *planlength - 1; i >= 0; i--) {
+                    (*plan)[i] = (double*) malloc(numofDOFs * sizeof(double));
                     for(int j = 0; j < numofDOFs; j++){
-                        (*plan)[i][j] = currJoint[j];
+                        (*plan)[i][j] = currNode->joint[j];
                     }
-                    //printf("Plan[%d] = [%f, %f, %f, %f, %f].\n", i,
-                    //        currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
-                    currJoint = jointParents[currJoint];
+                    currNode = currNode->parent;
                 }
                 return;
             }
@@ -454,6 +464,8 @@ static void plannerRRTConnect(double* worldMap, int x_size, int y_size,
         for (int i = 0; i < numofDOFs; i++) {
             currJoint[i] = (2 * PI ) * (((double)(rand() % discretizationFactor))/discretizationFactor);
         }
+        if(!IsValidArmConfiguration(currJoint, numofDOFs, worldMap, x_size, y_size))
+            continue;
         printf("currJoint = [%f, %f, %f, %f, %f]\n",
         	currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
         double closestNeighborDistance = getClosestNeighborFromTree(currJoint, currTree, numofDOFs, &closestNeighbor);
@@ -568,7 +580,10 @@ static void plannerRRTConnect(double* worldMap, int x_size, int y_size,
     }
 }
 
-
+static double getRRTStarRadius(int numVertices, int numofDOFs, double epsilon) {
+    double calcRad = pow((1000 * log(numVertices)/numVertices), (1.0/numofDOFs));
+    return min(calcRad, epsilon);
+}
 
 static void plannerRRTStar(double* worldMap, int x_size, int y_size,
         double* armstart_anglesV_rad, double* armgoal_anglesV_rad, int numofDOFs,
@@ -581,152 +596,232 @@ static void plannerRRTStar(double* worldMap, int x_size, int y_size,
     int discretizationFactor = getAngleDiscretizationFactor(numofDOFs);
     double discretizationStep = (2 * PI)/discretizationFactor;
     double epsilon = PI/4;
-    printf("Discretization factor is %d and epsilon is %f\n", discretizationFactor, epsilon);
 
 	Node* startNode = (Node*) malloc(sizeof(Node));
     startNode->joint = armstart_anglesV_rad;
     startNode->parent = 0;
     startNode->nodeNum = 1;
-    vector<Node*>* startTree = new vector<Node*>();
-    startTree->push_back(startNode);
+    startNode->cost = 0;
+    vector<Node*>* nodes = new vector<Node*>();
+    nodes->push_back(startNode);
     printf("Created startTree and added startNode to it.\n");
 
-    Node* goalNode = (Node*) malloc(sizeof(Node));
-    goalNode->joint = armgoal_anglesV_rad;
-    goalNode->parent = 0;
-    goalNode->nodeNum = 1;
-    vector<Node*>* goalTree = new vector<Node*>();
-    goalTree->push_back(goalNode);
-    printf("Created goalTree and added goalNode to it.\n");
-
-    vector<Node*>*  currTree = startTree;
     double* currJoint;
     Node* closestNeighbor;
-    int isStartTree = 1;
+    int isGoalJoint = 0;
     while (1) {
-        if (isStartTree)
-            printf("Start tree iteration!\n");
-        else
-            printf("Goal tree iteration!\n");
-
-        currJoint = (double*) malloc(numofDOFs * sizeof(double));
-        for (int i = 0; i < numofDOFs; i++) {
-            currJoint[i] = (2 * PI ) * (((double)(rand() % discretizationFactor))/discretizationFactor);
+        if (rand() % 2 == 1) {
+            currJoint = (double*) malloc(numofDOFs * sizeof(double));
+            for (int i = 0; i < numofDOFs; i++) {
+                currJoint[i] = armgoal_anglesV_rad[i];
+            }
+            isGoalJoint = 1;
+        } else {
+            currJoint = (double*) malloc(numofDOFs * sizeof(double));
+            generateRandomJoint(&currJoint, numofDOFs);
+            isGoalJoint = 0;
         }
-        printf("currJoint = [%f, %f, %f, %f, %f]\n",
-        	currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
-        double closestNeighborDistance = getClosestNeighborFromTree(currJoint, currTree, numofDOFs, &closestNeighbor);
+        if(!IsValidArmConfiguration(currJoint, numofDOFs, worldMap, x_size, y_size))
+            continue;
 
-        printf("closestNeighbor to currJoint is %f away = [%f, %f, %f, %f, %f]\n", closestNeighborDistance,
-                closestNeighbor->joint[0], closestNeighbor->joint[1], closestNeighbor->joint[2],
-                closestNeighbor->joint[3], closestNeighbor->joint[4]);
+        // Calculate closest neighbor
+        double radius = getRRTStarRadius(nodes->size(), numofDOFs, epsilon);
+        vector<Node*>* nearNodes = new vector<Node*>();
+        vector<double>* nearNodeDistances = new vector<double>();
+
+        double closestNeighborDistance = getClosestNeighborFromTreeAndNearNodes(
+                currJoint, nodes, numofDOFs, &closestNeighbor, nearNodes, nearNodeDistances, radius);
+
+        printf("Radius = %f, Num nearest nodes = %d, total num nodes = %d\n", radius, nearNodes->size(), nodes->size());
 
         if (closestNeighborDistance > epsilon) {
+            isGoalJoint = 0;
             for (int j = 0; j < numofDOFs; j++) {
                 currJoint[j] = closestNeighbor->joint[j] + epsilon * ((currJoint[j] - closestNeighbor->joint[j])/closestNeighborDistance);
             }
             closestNeighborDistance = epsilon;
+            //printf("Distance was greater than epsilon(%f), so updated currJoint to [%f, %f, %f, %f, %f]\n",
+            //        epsilon, currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
         }
+
         int jointTransitionValid = isJointTransitionValid(closestNeighborDistance, discretizationStep, numofDOFs,
                 currJoint, closestNeighbor->joint, worldMap, x_size, y_size);
-        printf("currJoint to neighborJoint valid = %d\n", jointTransitionValid);
 
-        Node* currNode;
         if (jointTransitionValid) {
-            currNode = (Node*) malloc(sizeof(Node));
-            currNode->joint = currJoint;
-            currNode->parent = closestNeighbor;
-            currNode->nodeNum = closestNeighbor->nodeNum + 1;
-            currTree->push_back(currNode);
-            printf("currJoint was valid, so added it to lists -- there are now %d nodes.\n",  currTree->size());
-        }
-        
-        if (isStartTree) {
-            currTree = goalTree;
-            isStartTree = 0;
-        } else {
-            currTree = startTree;
-            isStartTree = 1;
-        }
-        printf("Swapped trees. isStartTree = %d\n",  isStartTree);
-        
-        if (jointTransitionValid) {
-            
-            // Calculate closest neighbor
-            closestNeighborDistance = getClosestNeighborFromTree(currJoint, currTree, numofDOFs, &closestNeighbor);
-            printf("closestNeighbor to currJoint is %f away = [%f, %f, %f, %f, %f]\n", closestNeighborDistance,
-                closestNeighbor->joint[0], closestNeighbor->joint[1], closestNeighbor->joint[2],
-                closestNeighbor->joint[3], closestNeighbor->joint[4]);
 
-            double* otherJoint;
-            while (closestNeighborDistance > epsilon) {
-                otherJoint = (double*) malloc(numofDOFs * sizeof(double));
-                for (int j = 0; j < numofDOFs; j++) {
-                    otherJoint[j] = closestNeighbor->joint[j] + epsilon * ((currJoint[j] - closestNeighbor->joint[j])/closestNeighborDistance);
-                }
-                printf("otherJoint = [%f, %f, %f, %f, %f]\n",
-                    otherJoint[0], otherJoint[1], otherJoint[2], otherJoint[3], otherJoint[4]);
-                int jointTransitionValid = isJointTransitionValid(epsilon, discretizationStep, numofDOFs,
-                    otherJoint, closestNeighbor->joint, worldMap, x_size, y_size);
-                printf("otherJoint to neighborJoint valid = %d\n", jointTransitionValid);
+            if (isGoalJoint) {
+                Node* currNode = (Node*) malloc(sizeof(Node));
+                currNode->joint = currJoint;
+                currNode->parent = closestNeighbor;
+                currNode->nodeNum = closestNeighbor->nodeNum + 1;
+                nodes->push_back(currNode);
+                printf("Reached goalJoint -- building plan of length %d.\n", currNode->nodeNum);
+                *plan = (double**) malloc(currNode->nodeNum * sizeof(double*));
+                *planlength = currNode->nodeNum;
 
-                if (jointTransitionValid) {
-                    Node* otherNode = (Node*) malloc(sizeof(Node));
-                    otherNode->joint = otherJoint;
-                    otherNode->parent = closestNeighbor;
-                    otherNode->nodeNum = closestNeighbor->nodeNum + 1;
-                    currTree->push_back(otherNode);
-                    closestNeighbor = otherNode;
-                    closestNeighborDistance -= epsilon;
-                } else {
-                    break;
-                }
-            }
-
-            if (closestNeighborDistance <= epsilon) {
-                Node* startTreeNode;
-                Node* goalTreeNode;
-                if (isStartTree) {
-                    startTreeNode = closestNeighbor;
-                    goalTreeNode = currNode;
-                } else {
-                    startTreeNode = currNode;
-                    goalTreeNode = closestNeighbor;
-                }
-                int startTreeLength = startTreeNode->nodeNum;
-                int goalTreeLength = goalTreeNode->nodeNum;
-                //printf("Connect succeeded!\n");
-                *planlength = startTreeLength + goalTreeLength;
-                *plan = (double**) malloc(*planlength * sizeof(double*));
-
-                printf("Start side has %d nodes\n", startTreeLength);
-                for (int i = startTreeLength - 1; i >= 0; i--) {
+                printf("Path has %d nodes and %d total nodes were generated.\n", *planlength, nodes->size());
+                for (int i = *planlength - 1; i >= 0; i--) {
                     (*plan)[i] = (double*) malloc(numofDOFs * sizeof(double));
                     for(int j = 0; j < numofDOFs; j++){
-                        (*plan)[i][j] = startTreeNode->joint[j];
+                        (*plan)[i][j] = currNode->joint[j];
                     }
-                    startTreeNode = startTreeNode->parent;
+                    currNode = currNode->parent;
                 }
-
-                printf("Goal side has %d nodes\n", goalTreeNode->nodeNum);
-                for (int i = 0; i < goalTreeLength; i++) {
-                    (*plan)[i + startTreeLength] = (double*) malloc(numofDOFs * sizeof(double));
-                    for(int j = 0; j < numofDOFs; j++){
-                        (*plan)[i + startTreeLength][j] = goalTreeNode->joint[j];
-                    }
-                    goalTreeNode = goalTreeNode->parent;
-                }
-                for (int i = 0; i < *planlength; i++) {
-                    printf("Plan step %d = [%f, %f, %f, %f, %f]\n", i, (*plan)[i][0], (*plan)[i][1], (*plan)[i][2],
-                            (*plan)[i][3], (*plan)[i][4]);
-                }
-                printf("Total number of nodes = %d\n", startTree->size() + goalTree->size());
                 return;
+            }
+
+            vector<int>* nearNodeObstacleFree = new vector<int>();
+
+            Node* minNode = closestNeighbor;
+            double minCost = closestNeighbor->cost + closestNeighborDistance;
+            for (int i = 0; i < nearNodes->size(); i++) {
+                int jointTransitionValid = isJointTransitionValid((*nearNodeDistances)[i], discretizationStep, numofDOFs,
+                    currJoint, (*nearNodes)[i]->joint, worldMap, x_size, y_size);
+                
+                nearNodeObstacleFree->push_back(jointTransitionValid);
+                if (jointTransitionValid) {
+                    double currCost = (*nearNodes)[i]->cost + (*nearNodeDistances)[i];
+                    if (currCost < minCost) {
+                        minNode = (*nearNodes)[i];
+                        minCost = currCost;
+                    }
+                }
+            }
+            
+            Node* currNode = (Node*) malloc(sizeof(Node));
+            currNode->joint = currJoint;
+            currNode->parent = minNode;
+            currNode->nodeNum = minNode->nodeNum + 1;
+            currNode->cost = minCost;
+            nodes->push_back(currNode);
+
+            for (int i = 0; i < nearNodes->size(); i++) {
+                if ((*nearNodes)[i] == minNode)
+                    continue;
+                double currCost = currNode->cost + (*nearNodeDistances)[i];
+                if ((*nearNodeObstacleFree)[i] && currCost < (*nearNodes)[i]->cost) {
+                    (*nearNodes)[i]->cost = currCost;
+                    (*nearNodes)[i]->parent = currNode;
+                    (*nearNodes)[i]->nodeNum = currNode->nodeNum + 1;
+                }
             }
         }
     }
 }
 
+struct PRMNode {
+    double* joint;
+    vector<PRMNode*> neighbors;
+    int connectedToStart;
+    int connectedToGoal;
+};
+
+static void getNearPRMNodes(double* joint, vector<PRMNode*>* nodes, vector<PRMNode*>* nearNodes, vector<double>* nearNodeDistances, double radius, int numofDOFs) {
+    radius = pow(radius, 2);
+    for (int i = 0; i < nodes->size(); i++) {
+        PRMNode* neighbor = (*nodes)[i];
+        double* neighborJoint = neighbor->joint;
+        double currNeighborDistance = 0;
+        for (int j = 0; j < numofDOFs; j++) {
+            currNeighborDistance += pow(fabs(neighborJoint[j] - joint[j]), 2);
+        }
+        //printf("***neighborJoint is , [%f, %f, %f, %f, %f]\n",
+        //            neighborJoint[0], neighborJoint[1], neighborJoint[2], neighborJoint[3], neighborJoint[4]);
+        if (currNeighborDistance <= radius) {
+            nearNodes->push_back(neighbor);
+            nearNodeDistances->push_back(sqrt(currNeighborDistance));
+        }
+    }
+}
+
+static int propagateStartGoalConnected(PRMNode* node) {
+    int startGoalConnected = (node->connectedToStart && node->connectedToGoal);
+    PRMNode* currNeighbor;
+    int currNeighborConnectedToStart;
+    int currNeighborConnectedToGoal;
+    for (int i = 0; i < node->neighbors.size(); i++) {
+        currNeighbor = node->neighbors[i];
+        currNeighborConnectedToStart = currNeighbor->connectedToStart;
+        currNeighborConnectedToGoal = currNeighbor->connectedToGoal;
+        currNeighbor->connectedToStart = (currNeighbor->connectedToStart || node->connectedToStart);
+        currNeighbor->connectedToGoal = (currNeighbor->connectedToGoal || node->connectedToGoal);
+        if (currNeighborConnectedToStart != node->connectedToStart || currNeighborConnectedToGoal != node->connectedToGoal) {
+            if(propagateStartGoalConnected(currNeighbor)) {
+                startGoalConnected = 1;
+            }
+        }
+    }
+    return startGoalConnected;
+}
+
+static void plannerPRM(double* worldMap, int x_size, int y_size,
+        double* armstart_anglesV_rad, double* armgoal_anglesV_rad, int numofDOFs,
+        double*** plan, int* planlength) {
+
+	//no plan by default
+	*plan = NULL;
+	*planlength = 0;
+
+    int discretizationFactor = getAngleDiscretizationFactor(numofDOFs);
+    double discretizationStep = (2 * PI)/discretizationFactor;
+    double epsilon = PI/4;
+
+    vector<PRMNode*>* nodes = new vector<PRMNode*>();
+
+    PRMNode* startNode = (PRMNode*) malloc(sizeof(PRMNode));
+    startNode->joint = armstart_anglesV_rad;
+    startNode->connectedToStart = 1;
+    startNode->connectedToGoal = 0;
+    startNode->neighbors = vector<PRMNode*>();
+    nodes->push_back(startNode);
+
+    PRMNode* goalNode = (PRMNode*) malloc(sizeof(PRMNode));
+    goalNode->joint = armgoal_anglesV_rad;
+    goalNode->connectedToStart = 0;
+    goalNode->connectedToGoal = 1;
+    goalNode->neighbors = vector<PRMNode*>();
+    nodes->push_back(goalNode);
+
+    double* currJoint;
+    while(1) {
+        currJoint = (double*) malloc(numofDOFs * sizeof(double));
+        generateRandomJoint(&currJoint, numofDOFs);
+        if(!IsValidArmConfiguration(currJoint, numofDOFs, worldMap, x_size, y_size))
+            continue;
+        printf("currJoint is , [%f, %f, %f, %f, %f]\n",
+            currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
+
+        vector<PRMNode*>* nearNodes = new vector<PRMNode*>();
+        vector<double>* nearNodeDistances = new vector<double>();
+        double radius = getRRTStarRadius(nodes->size(), numofDOFs, epsilon);
+        getNearPRMNodes(currJoint, nodes, nearNodes, nearNodeDistances, radius, numofDOFs);
+        printf("Radius = %f, Num nearest nodes = %d, total num nodes = %d\n", radius, nearNodes->size(), nodes->size());
+
+        PRMNode* currNode = (PRMNode*) malloc(sizeof(PRMNode));
+        currNode->joint = currJoint;
+        currNode->connectedToStart = 0;
+        currNode->connectedToGoal = 0;
+        currNode->neighbors = vector<PRMNode*>();
+        nodes->push_back(currNode);
+        printf("currNode added to nodes\n");
+
+        PRMNode* neighbor;
+        double neighborDistance;
+        for(int i = 0; i < nearNodes->size(); i++) {
+            neighbor = (*nearNodes)[i];
+            neighborDistance = (*nearNodeDistances)[i];
+            printf("neighbor is , [%f, %f, %f, %f, %f]\n",
+                neighbor[0], neighbor[1], neighbor[2], neighbor[3], neighbor[4]);
+            if(!isJointTransitionValid(neighborDistance, discretizationStep, numofDOFs, currNode->joint, neighbor->joint, worldMap, x_size, y_size))
+                continue;
+            neighbor->neighbors.push_back(currNode);
+            currNode->neighbors.push_back(neighbor);
+        }
+        if (propagateStartGoalConnected(currNode))
+            break;
+    }
+    printf("Start goal connected!  %d nodes expanded!", nodes->size());
+}
 //prhs contains input parameters (3): 
 //1st is matrix with all the obstacles
 //2nd is a row vector of start angles for the arm 
@@ -788,6 +883,9 @@ void mexFunction( int nlhs, mxArray *plhs[],
     } else if (planner_id == RRTSTAR) {
         printf("Running RRT Star Planner\n");
         plannerRRTStar(map,x_size,y_size, armstart_anglesV_rad, armgoal_anglesV_rad, numofDOFs, &plan, &planlength);
+    } else if (planner_id == PRM) {
+        printf("Running PRM Planner\n");
+        plannerPRM(map,x_size,y_size, armstart_anglesV_rad, armgoal_anglesV_rad, numofDOFs, &plan, &planlength);
     } else {
         printf("Running Dummy Planner\n");
         //dummy planner which only computes interpolated path
