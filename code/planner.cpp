@@ -24,6 +24,7 @@ using namespace std;
 #define RRTCONNECT  1
 #define RRTSTAR     2
 #define PRM         3
+#define ALL         4
 
 /* Output Arguments */
 #define	PLAN_OUT	plhs[0]
@@ -40,6 +41,7 @@ using namespace std;
 #endif
 
 #define PI 3.141592654
+#define TIMELIMIT 5
 
 //the length of each link in the arm (should be the same as the one used in runtest.m)
 #define LINKLENGTH_CELLS 10
@@ -372,17 +374,26 @@ static ExperimentResult plannerRRT(double* worldMap, int x_size, int y_size,
     //printf("Discretization factor is %d and epsilon is %f\n", discretizationFactor, epsilon);
 
 	Node* startNode = (Node*) malloc(sizeof(Node));
-    startNode->joint = armstart_anglesV_rad;
+    double* startJoint = (double*) malloc(numofDOFs * sizeof(double));
+    for (int i = 0; i < numofDOFs; i++) {
+        startJoint[i] = armstart_anglesV_rad[i];
+    }
+    startNode->joint = startJoint;
     startNode->parent = 0;
     startNode->nodeNum = 1;
     vector<Node*>* nodes = new vector<Node*>();
     nodes->push_back(startNode);
-    printf("Created startTree and added startNode to it.\n");
+    //printf("Created startTree and added startNode to it.\n");
 
     double* currJoint;
     Node* closestNeighbor;
     int isGoalJoint = 0;
     while (1) {
+        if (((clock() - start ) / (double) CLOCKS_PER_SEC) > TIMELIMIT) {
+            ExperimentResult result;
+            result.planningTime = -1;
+            return result;
+        }
         if (rand() % 2 == 1) {
             currJoint = (double*) malloc(numofDOFs * sizeof(double));
             for (int i = 0; i < numofDOFs; i++) {
@@ -440,7 +451,11 @@ static ExperimentResult plannerRRT(double* worldMap, int x_size, int y_size,
                 result.numNodes = nodes->size();
                 result.planLength = *planlength;
                 result.planQuality = getPlanQuality(plan, planlength, numofDOFs);
-                printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
+                for(int i = 0; i < nodes->size(); i++) {
+                    free((*nodes)[i]->joint);
+                    free((*nodes)[i]);
+                }
+                //printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
                 return result;
             }
         }
@@ -460,33 +475,46 @@ static ExperimentResult plannerRRTConnect(double* worldMap, int x_size, int y_si
     int discretizationFactor = getAngleDiscretizationFactor(numofDOFs);
     double discretizationStep = (2 * PI)/discretizationFactor;
     double epsilon = PI/4;
-    printf("Discretization factor is %d and epsilon is %f\n", discretizationFactor, epsilon);
+    //printf("Discretization factor is %d and epsilon is %f\n", discretizationFactor, epsilon);
 
 	Node* startNode = (Node*) malloc(sizeof(Node));
-    startNode->joint = armstart_anglesV_rad;
+    double* startJoint = (double*) malloc(numofDOFs * sizeof(double));
+    for (int i = 0; i < numofDOFs; i++) {
+        startJoint[i] = armstart_anglesV_rad[i];
+    }
+    startNode->joint = startJoint;
     startNode->parent = 0;
     startNode->nodeNum = 1;
     vector<Node*>* startTree = new vector<Node*>();
     startTree->push_back(startNode);
-    printf("Created startTree and added startNode to it.\n");
+    //printf("Created startTree and added startNode to it.\n");
 
     Node* goalNode = (Node*) malloc(sizeof(Node));
+    double* goalJoint = (double*) malloc(numofDOFs * sizeof(double));
+    for (int i = 0; i < numofDOFs; i++) {
+        goalJoint[i] = armgoal_anglesV_rad[i];
+    }
     goalNode->joint = armgoal_anglesV_rad;
     goalNode->parent = 0;
     goalNode->nodeNum = 1;
     vector<Node*>* goalTree = new vector<Node*>();
     goalTree->push_back(goalNode);
-    printf("Created goalTree and added goalNode to it.\n");
+    //printf("Created goalTree and added goalNode to it.\n");
 
     vector<Node*>*  currTree = startTree;
     double* currJoint;
     Node* closestNeighbor;
     int isStartTree = 1;
     while (1) {
-        if (isStartTree)
+        if (((clock() - start ) / (double) CLOCKS_PER_SEC) > TIMELIMIT) {
+            ExperimentResult result;
+            result.planningTime = -1;
+            return result;
+        }
+        /*if (isStartTree)
             printf("Start tree iteration!\n");
         else
-            printf("Goal tree iteration!\n");
+            printf("Goal tree iteration!\n");*/
 
         currJoint = (double*) malloc(numofDOFs * sizeof(double));
         for (int i = 0; i < numofDOFs; i++) {
@@ -494,13 +522,13 @@ static ExperimentResult plannerRRTConnect(double* worldMap, int x_size, int y_si
         }
         if(!IsValidArmConfiguration(currJoint, numofDOFs, worldMap, x_size, y_size))
             continue;
-        printf("currJoint = [%f, %f, %f, %f, %f]\n",
-        	currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
+        //printf("currJoint = [%f, %f, %f, %f, %f]\n",
+        //	currJoint[0], currJoint[1], currJoint[2], currJoint[3], currJoint[4]);
         double closestNeighborDistance = getClosestNeighborFromTree(currJoint, currTree, numofDOFs, &closestNeighbor);
 
-        printf("closestNeighbor to currJoint is %f away = [%f, %f, %f, %f, %f]\n", closestNeighborDistance,
-                closestNeighbor->joint[0], closestNeighbor->joint[1], closestNeighbor->joint[2],
-                closestNeighbor->joint[3], closestNeighbor->joint[4]);
+        //printf("closestNeighbor to currJoint is %f away = [%f, %f, %f, %f, %f]\n", closestNeighborDistance,
+        //        closestNeighbor->joint[0], closestNeighbor->joint[1], closestNeighbor->joint[2],
+        //        closestNeighbor->joint[3], closestNeighbor->joint[4]);
 
         if (closestNeighborDistance > epsilon) {
             for (int j = 0; j < numofDOFs; j++) {
@@ -510,7 +538,7 @@ static ExperimentResult plannerRRTConnect(double* worldMap, int x_size, int y_si
         }
         int jointTransitionValid = isJointTransitionValid(closestNeighborDistance, discretizationStep, numofDOFs,
                 currJoint, closestNeighbor->joint, worldMap, x_size, y_size);
-        printf("currJoint to neighborJoint valid = %d\n", jointTransitionValid);
+        // printf("currJoint to neighborJoint valid = %d\n", jointTransitionValid);
 
         Node* currNode;
         if (jointTransitionValid) {
@@ -529,15 +557,15 @@ static ExperimentResult plannerRRTConnect(double* worldMap, int x_size, int y_si
             currTree = startTree;
             isStartTree = 1;
         }
-        printf("Swapped trees. isStartTree = %d\n",  isStartTree);
+        //printf("Swapped trees. isStartTree = %d\n",  isStartTree);
         
         if (jointTransitionValid) {
             
             // Calculate closest neighbor
             closestNeighborDistance = getClosestNeighborFromTree(currJoint, currTree, numofDOFs, &closestNeighbor);
-            printf("closestNeighbor to currJoint is %f away = [%f, %f, %f, %f, %f]\n", closestNeighborDistance,
-                closestNeighbor->joint[0], closestNeighbor->joint[1], closestNeighbor->joint[2],
-                closestNeighbor->joint[3], closestNeighbor->joint[4]);
+            //printf("closestNeighbor to currJoint is %f away = [%f, %f, %f, %f, %f]\n", closestNeighborDistance,
+            //    closestNeighbor->joint[0], closestNeighbor->joint[1], closestNeighbor->joint[2],
+            //    closestNeighbor->joint[3], closestNeighbor->joint[4]);
 
             double* otherJoint;
             while (closestNeighborDistance > epsilon) {
@@ -545,11 +573,11 @@ static ExperimentResult plannerRRTConnect(double* worldMap, int x_size, int y_si
                 for (int j = 0; j < numofDOFs; j++) {
                     otherJoint[j] = closestNeighbor->joint[j] + epsilon * ((currJoint[j] - closestNeighbor->joint[j])/closestNeighborDistance);
                 }
-                printf("otherJoint = [%f, %f, %f, %f, %f]\n",
-                    otherJoint[0], otherJoint[1], otherJoint[2], otherJoint[3], otherJoint[4]);
+                //printf("otherJoint = [%f, %f, %f, %f, %f]\n",
+                //    otherJoint[0], otherJoint[1], otherJoint[2], otherJoint[3], otherJoint[4]);
                 int jointTransitionValid = isJointTransitionValid(epsilon, discretizationStep, numofDOFs,
                     otherJoint, closestNeighbor->joint, worldMap, x_size, y_size);
-                printf("otherJoint to neighborJoint valid = %d\n", jointTransitionValid);
+                //printf("otherJoint to neighborJoint valid = %d\n", jointTransitionValid);
 
                 if (jointTransitionValid) {
                     Node* otherNode = (Node*) malloc(sizeof(Node));
@@ -580,7 +608,7 @@ static ExperimentResult plannerRRTConnect(double* worldMap, int x_size, int y_si
                 *planlength = startTreeLength + goalTreeLength;
                 *plan = (double**) malloc(*planlength * sizeof(double*));
 
-                printf("Start side has %d nodes\n", startTreeLength);
+                // printf("Start side has %d nodes\n", startTreeLength);
                 for (int i = startTreeLength - 1; i >= 0; i--) {
                     (*plan)[i] = (double*) malloc(numofDOFs * sizeof(double));
                     for(int j = 0; j < numofDOFs; j++){
@@ -589,7 +617,7 @@ static ExperimentResult plannerRRTConnect(double* worldMap, int x_size, int y_si
                     startTreeNode = startTreeNode->parent;
                 }
 
-                printf("Goal side has %d nodes\n", goalTreeNode->nodeNum);
+                // printf("Goal side has %d nodes\n", goalTreeNode->nodeNum);
                 for (int i = 0; i < goalTreeLength; i++) {
                     (*plan)[i + startTreeLength] = (double*) malloc(numofDOFs * sizeof(double));
                     for(int j = 0; j < numofDOFs; j++){
@@ -597,16 +625,24 @@ static ExperimentResult plannerRRTConnect(double* worldMap, int x_size, int y_si
                     }
                     goalTreeNode = goalTreeNode->parent;
                 }
-                for (int i = 0; i < *planlength; i++) {
+                /*for (int i = 0; i < *planlength; i++) {
                     printf("Plan step %d = [%f, %f, %f, %f, %f]\n", i, (*plan)[i][0], (*plan)[i][1], (*plan)[i][2],
                             (*plan)[i][3], (*plan)[i][4]);
-                }
+                }*/
                 ExperimentResult result;
                 result.planningTime = (clock() - start ) / (double) CLOCKS_PER_SEC;
                 result.numNodes = startTree->size() + goalTree->size();
                 result.planLength = *planlength;
                 result.planQuality = getPlanQuality(plan, planlength, numofDOFs);
-                printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
+                for(int i = 0; i < startTree->size(); i++) {
+                    free((*startTree)[i]->joint);
+                    free((*startTree)[i]);
+                }
+                for(int i = 0; i < goalTree->size(); i++) {
+                    free((*goalTree)[i]->joint);
+                    free((*goalTree)[i]);
+                }
+                //printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
                 return result;
             }
         }
@@ -633,13 +669,17 @@ static ExperimentResult plannerRRTStar(double* worldMap, int x_size, int y_size,
     double epsilon = PI/4;
 
 	Node* startNode = (Node*) malloc(sizeof(Node));
-    startNode->joint = armstart_anglesV_rad;
+    double* startJoint = (double*) malloc(numofDOFs * sizeof(double));
+    for (int i = 0; i < numofDOFs; i++) {
+        startJoint[i] = armstart_anglesV_rad[i];
+    }
+    startNode->joint = startJoint;
     startNode->parent = 0;
     startNode->nodeNum = 1;
     startNode->cost = 0;
     vector<Node*>* nodes = new vector<Node*>();
     nodes->push_back(startNode);
-    printf("Created startTree and added startNode to it.\n");
+    //printf("Created startTree and added startNode to it.\n");
 
     double* currJoint;
     Node* closestNeighbor;
@@ -647,6 +687,11 @@ static ExperimentResult plannerRRTStar(double* worldMap, int x_size, int y_size,
     int isGoalJoint = 0;
     int numAfterGoal = -1;
     while (1) {
+        if (((clock() - start ) / (double) CLOCKS_PER_SEC) > TIMELIMIT) {
+            ExperimentResult result;
+            result.planningTime = -1;
+            return result;
+        }
         if (rand() % 2 == 1 && numAfterGoal == -1) {
             currJoint = (double*) malloc(numofDOFs * sizeof(double));
             for (int i = 0; i < numofDOFs; i++) {
@@ -669,7 +714,7 @@ static ExperimentResult plannerRRTStar(double* worldMap, int x_size, int y_size,
         double closestNeighborDistance = getClosestNeighborFromTreeAndNearNodes(
                 currJoint, nodes, numofDOFs, &closestNeighbor, nearNodes, nearNodeDistances, radius);
 
-        printf("Radius = %f, Num nearest nodes = %d, total num nodes = %d\n", radius, nearNodes->size(), nodes->size());
+        //printf("Radius = %f, Num nearest nodes = %d, total num nodes = %d\n", radius, nearNodes->size(), nodes->size());
 
         if (closestNeighborDistance > epsilon) {
             isGoalJoint = 0;
@@ -729,12 +774,12 @@ static ExperimentResult plannerRRTStar(double* worldMap, int x_size, int y_size,
 
             if (isGoalJoint) {
                 numAfterGoal = 1000; // Start the countdown!
-                printf("Reached goalJoint -- expanding %d more nodes to improve path quality.\n", numAfterGoal);
+                //printf("Reached goalJoint -- expanding %d more nodes to improve path quality.\n", numAfterGoal);
                 goalNode = currNode;
             }
         }
     }
-    printf("Reached goalJoint -- building plan of length %d.\n", goalNode->nodeNum);
+    //printf("Reached goalJoint -- building plan of length %d.\n", goalNode->nodeNum);
     *plan = (double**) malloc(goalNode->nodeNum * sizeof(double*));
     *planlength = goalNode->nodeNum;
 
@@ -750,7 +795,11 @@ static ExperimentResult plannerRRTStar(double* worldMap, int x_size, int y_size,
     result.numNodes = nodes->size();
     result.planLength = *planlength;
     result.planQuality = getPlanQuality(plan, planlength, numofDOFs);
-    printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
+    for(int i = 0; i < nodes->size(); i++) {
+        free((*nodes)[i]->joint);
+        free((*nodes)[i]);
+    }
+    //printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
     return result;
 }
 
@@ -819,8 +868,13 @@ static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
 
     vector<PRMNode*>* nodes = new vector<PRMNode*>();
 
+    
     PRMNode* startNode = (PRMNode*) malloc(sizeof(PRMNode));
-    startNode->joint = armstart_anglesV_rad;
+    double* startJoint = (double*) malloc(numofDOFs * sizeof(double));
+    for (int i = 0; i < numofDOFs; i++) {
+        startJoint[i] = armstart_anglesV_rad[i];
+    }
+    startNode->joint = startJoint;
     startNode->connectedToStart = 1;
     startNode->connectedToGoal = 0;
     startNode->neighbors = new vector<PRMNode*>();
@@ -828,7 +882,11 @@ static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
     nodes->push_back(startNode);
 
     PRMNode* goalNode = (PRMNode*) malloc(sizeof(PRMNode));
-    goalNode->joint = armgoal_anglesV_rad;
+    double* goalJoint = (double*) malloc(numofDOFs * sizeof(double));
+    for (int i = 0; i < numofDOFs; i++) {
+        goalJoint[i] = armgoal_anglesV_rad[i];
+    }
+    goalNode->joint = goalJoint;
     goalNode->connectedToStart = 0;
     goalNode->connectedToGoal = 1;
     goalNode->neighbors = new vector<PRMNode*>();
@@ -837,6 +895,11 @@ static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
 
     double* currJoint;
     while(1) {
+        if (((clock() - start ) / (double) CLOCKS_PER_SEC) > TIMELIMIT) {
+            ExperimentResult result;
+            result.planningTime = -1;
+            return result;
+        }
         currJoint = (double*) malloc(numofDOFs * sizeof(double));
         generateRandomJoint(&currJoint, numofDOFs);
         if(!IsValidArmConfiguration(currJoint, numofDOFs, worldMap, x_size, y_size))
@@ -848,7 +911,7 @@ static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
         vector<double>* nearNodeDistances = new vector<double>();
         double radius = getRRTStarRadius(nodes->size(), numofDOFs, epsilon);
         getNearPRMNodes(currJoint, nodes, nearNodes, nearNodeDistances, radius, numofDOFs);
-        printf("Radius = %f, Num nearest nodes = %d, total num nodes = %d\n", radius, nearNodes->size(), nodes->size());
+        // printf("Radius = %f, Num nearest nodes = %d, total num nodes = %d\n", radius, nearNodes->size(), nodes->size());
 
         PRMNode* currNode = (PRMNode*) malloc(sizeof(PRMNode));
         currNode->joint = currJoint;
@@ -874,7 +937,7 @@ static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
         if (propagateStartGoalConnected(currNode))
             break;
     }
-    printf("Start goal connected!  %d nodes expanded!", nodes->size());
+    // printf("Start goal connected!  %d nodes expanded!", nodes->size());
     
     queue<PRMNode*> prmQueue;
     prmQueue.push(startNode);
@@ -884,7 +947,7 @@ static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
         currNode = prmQueue.front();
         prmQueue.pop();
         if (currNode == goalNode) {
-            printf("Found path to goalNode!\n");
+            //printf("Found path to goalNode!\n");
             break;
         }
         PRMNode* neighbor;
@@ -908,12 +971,17 @@ static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
         }
         currNode = currNode->neighborToStart;
     }
+    
     ExperimentResult result;
     result.planningTime = (clock() - start ) / (double) CLOCKS_PER_SEC;
     result.numNodes = nodes->size();
     result.planLength = *planlength;
     result.planQuality = getPlanQuality(plan, planlength, numofDOFs);
-    printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
+    //printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
+    for(int i = 0; i < nodes->size(); i++) {
+        free((*nodes)[i]->joint);
+        free((*nodes)[i]);
+    }
     return result;
 }
 
@@ -926,9 +994,8 @@ static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
 //(there are D DoF of the arm (that is, D angles). So, j can take values from 0 to D-1
 //2nd is planlength (int)
 void mexFunction( int nlhs, mxArray *plhs[], 
-		  int nrhs, const mxArray*prhs[])
-     
-{ 
+		  int nrhs, const mxArray*prhs[])    
+{
     
     /* Check for proper number of arguments */    
     if (nrhs != 4) { 
@@ -959,9 +1026,9 @@ void mexFunction( int nlhs, mxArray *plhs[],
  
     //get the planner id
     int planner_id = (int)*mxGetPr(PLANNER_ID_IN);
-    if(planner_id < 0 || planner_id > 3){
+    if(planner_id < 0 || planner_id > 4){
 	    mexErrMsgIdAndTxt( "MATLAB:planner:invalidplanner_id",
-                "planner id should be between 0 and 3 inclusive");         
+                "planner id should be between 0 and 4 inclusive");         
     }
     
     //call the planner
@@ -981,13 +1048,122 @@ void mexFunction( int nlhs, mxArray *plhs[],
     } else if (planner_id == PRM) {
         printf("Running PRM Planner\n");
         plannerPRM(map,x_size,y_size, armstart_anglesV_rad, armgoal_anglesV_rad, numofDOFs, &plan, &planlength);
+    } else if (planner_id == ALL) {
+        printf("Running All Planners\n");
+        int numIterations = 20;
+        
+        double rrtPlanningTime = 0;
+        int rrtNumNodes = 0;
+        double rrtPlanQuality = 0;
+
+        double rrtConnectPlanningTime = 0;
+        int rrtConnectNumNodes = 0;
+        double rrtConnectPlanQuality = 0;
+
+        double rrtStarPlanningTime = 0;
+        int rrtStarNumNodes = 0;
+        double rrtStarPlanQuality = 0;
+
+        double prmPlanningTime = 0;
+        int prmNumNodes = 0;
+        double prmPlanQuality = 0;
+
+        int i = 1;
+        while (i <= numIterations) {
+            printf("Iteration %d\n", i);
+            double* start = (double*) malloc(numofDOFs * sizeof(double));
+            while(1) {
+                generateRandomJoint(&start, numofDOFs);
+                if(IsValidArmConfiguration(start, numofDOFs, map, x_size, y_size))
+                    break;
+            }
+            double* goal = (double*) malloc(numofDOFs * sizeof(double));
+            while(1) {
+                generateRandomJoint(&goal, numofDOFs);
+                if(IsValidArmConfiguration(goal, numofDOFs, map, x_size, y_size))
+                    break;
+            }
+            printf("start is  [");
+            for (int i = 0; i < numofDOFs-1; i++) {
+                printf("%f, ", start[i]);
+            }
+            printf("%f]\n", start[numofDOFs-1]);
+
+            printf("goal is  [");
+            for (int i = 0; i < numofDOFs-1; i++) {
+                printf("%f, ", goal[i]);
+            }
+            printf("%f]\n", goal[numofDOFs-1]);
+
+            ExperimentResult rrtResult = plannerRRT(map,x_size,y_size, start, goal, numofDOFs, &plan, &planlength);
+            if (rrtResult.planningTime == -1) {
+                printf("RRT took more than %d seconds, retrying iteration...\n\n", TIMELIMIT);
+                continue;
+            }
+            ExperimentResult rrtConnectResult = plannerRRTConnect(map,x_size,y_size, start, goal, numofDOFs, &plan, &planlength);
+            if (rrtConnectResult.planningTime == -1) {
+                printf("RRTConnect took more than %d seconds, retrying iteration...\n\n", TIMELIMIT);
+                continue;
+            }
+            ExperimentResult rrtStarResult = plannerRRTStar(map,x_size,y_size, start, goal, numofDOFs, &plan, &planlength);
+            if (rrtStarResult.planningTime == -1) {
+                printf("RRTStar took more than %d seconds, retrying iteration...\n\n", TIMELIMIT);
+                continue;
+            }
+            ExperimentResult prmResult = plannerPRM(map,x_size,y_size, start, goal, numofDOFs, &plan, &planlength);
+            if (prmResult.planningTime == -1) {
+                printf("PRM took more than %d seconds, retrying iteration...\n\n", TIMELIMIT);
+                continue;
+            }
+
+            printf("Algorithm | planningTime | numNodes | planLength | planQuality\n");
+            rrtPlanningTime += rrtResult.planningTime;
+            rrtNumNodes += rrtResult.numNodes;
+            rrtPlanQuality += rrtResult.planQuality;
+            printf("RRT | %f | %d | %d | %f\n", rrtResult.planningTime, rrtResult.numNodes, rrtResult.planLength, rrtResult.planQuality);
+            
+            rrtConnectPlanningTime += rrtConnectResult.planningTime;
+            rrtConnectNumNodes += rrtConnectResult.numNodes;
+            rrtConnectPlanQuality += rrtConnectResult.planQuality;
+            printf("RRTConnect | %f | %d | %d | %f\n", rrtConnectResult.planningTime, rrtConnectResult.numNodes, rrtConnectResult.planLength, rrtConnectResult.planQuality);
+
+            rrtStarPlanningTime += rrtStarResult.planningTime;
+            rrtStarNumNodes += rrtStarResult.numNodes;
+            rrtStarPlanQuality += rrtStarResult.planQuality;
+            printf("RRTStar | %f | %d | %d | %f\n", rrtStarResult.planningTime, rrtStarResult.numNodes, rrtStarResult.planLength, rrtStarResult.planQuality);
+
+            prmPlanningTime += prmResult.planningTime;
+            prmNumNodes += prmResult.numNodes;
+            prmPlanQuality += prmResult.planQuality;
+            printf("PRM | %f | %d | %d | %f\n", prmResult.planningTime, prmResult.numNodes, prmResult.planLength, prmResult.planQuality);
+            printf("-----------------------------------\n\n");
+
+            i++;
+        }
+        rrtPlanningTime /= numIterations;
+        rrtNumNodes /= numIterations;
+        rrtPlanQuality /= numIterations;
+        rrtConnectPlanningTime /= numIterations;
+        rrtConnectNumNodes /= numIterations;
+        rrtConnectPlanQuality /= numIterations;
+        rrtStarPlanningTime /= numIterations;
+        rrtStarNumNodes /= numIterations;
+        rrtStarPlanQuality /= numIterations;
+        prmPlanningTime /= numIterations;
+        prmNumNodes /= numIterations;
+        prmPlanQuality /= numIterations;
+        printf("Final Results!\n");
+        printf("Algorithm | avgPlanningTime | avgNumNodes |avgPlanQuality\n");
+        printf("RRT | %f | %d | %f\n", rrtPlanningTime, rrtNumNodes, rrtPlanQuality);
+        printf("RRTConnect | %f | %d | %f\n", rrtConnectPlanningTime, rrtConnectNumNodes, rrtConnectPlanQuality);
+        printf("RRTStar | %f | %d | %f\n", rrtStarPlanningTime, rrtStarNumNodes, rrtStarPlanQuality);
+        printf("PRM | %f | %d | %f\n", prmPlanningTime, prmNumNodes, prmPlanQuality);
+        printf("-----------------------------------\n\n");
     } else {
         printf("Running Dummy Planner\n");
         //dummy planner which only computes interpolated path
         planner(map,x_size,y_size, armstart_anglesV_rad, armgoal_anglesV_rad, numofDOFs, &plan, &planlength);
     }
-    
-    printf("planner returned plan of length=%d\n", planlength); 
     
     /* Create return values */
     if(planlength > 0)
