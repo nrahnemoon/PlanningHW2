@@ -447,7 +447,7 @@ static ExperimentResult plannerRRT(double* worldMap, int x_size, int y_size,
     }
 }
 
-static ExperimentResult plannerRRTConnect(double* worldMap, int x_size, int y_size,
+static void plannerRRTConnect(double* worldMap, int x_size, int y_size,
         double* armstart_anglesV_rad, double* armgoal_anglesV_rad, int numofDOFs,
         double*** plan, int* planlength) {
 
@@ -618,7 +618,7 @@ static double getRRTStarRadius(int numVertices, int numofDOFs, double epsilon) {
     return min(calcRad, epsilon);
 }
 
-static ExperimentResult plannerRRTStar(double* worldMap, int x_size, int y_size,
+static void plannerRRTStar(double* worldMap, int x_size, int y_size,
         double* armstart_anglesV_rad, double* armgoal_anglesV_rad, int numofDOFs,
         double*** plan, int* planlength) {
 
@@ -803,7 +803,7 @@ static int propagateStartGoalConnected(PRMNode* node) {
     return startGoalConnected;
 }
 
-static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
+static void plannerPRM(double* worldMap, int x_size, int y_size,
         double* armstart_anglesV_rad, double* armgoal_anglesV_rad, int numofDOFs,
         double*** plan, int* planlength) {
 
@@ -915,8 +915,10 @@ static ExperimentResult plannerPRM(double* worldMap, int x_size, int y_size,
     result.planQuality = getPlanQuality(plan, planlength, numofDOFs);
     printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
     return result;
-}
 
+    printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", *planlength, nodes->size(), duration, planQuality);
+    return;
+}
 //prhs contains input parameters (3): 
 //1st is matrix with all the obstacles
 //2nd is a row vector of start angles for the arm 
