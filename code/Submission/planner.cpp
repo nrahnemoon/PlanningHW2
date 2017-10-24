@@ -41,10 +41,16 @@ using namespace std;
 #endif
 
 #define PI 3.141592654
-#define TIMELIMIT 30
+#define TIMELIMIT 60
 
 //the length of each link in the arm (should be the same as the one used in runtest.m)
 #define LINKLENGTH_CELLS 10
+
+#ifdef _BLAS64_
+#define int_F ptrdiff_t
+#else
+#define int_F int
+#endif
 
 typedef struct {
   int X1, Y1;
@@ -455,7 +461,7 @@ static ExperimentResult plannerRRT(double* worldMap, int x_size, int y_size,
                     free((*nodes)[i]->joint);
                     free((*nodes)[i]);
                 }
-                printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
+                //printf("Path has %d nodes and %d total nodes were generated in %f seconds with planQuality %f.\n", result.planLength, result.numNodes, result.planningTime, result.planQuality);
                 return result;
             }
         }
@@ -703,8 +709,10 @@ static ExperimentResult plannerRRTStar(double* worldMap, int x_size, int y_size,
             generateRandomJoint(&currJoint, numofDOFs);
             isGoalJoint = 0;
         }
-        if(!IsValidArmConfiguration(currJoint, numofDOFs, worldMap, x_size, y_size))
+        if(!IsValidArmConfiguration(currJoint, numofDOFs, worldMap, x_size, y_size)) {
+            free(currJoint);
             continue;
+        }
 
         // Calculate closest neighbor
         double radius = getRRTStarRadius(nodes->size(), numofDOFs, epsilon);
@@ -779,11 +787,23 @@ static ExperimentResult plannerRRTStar(double* worldMap, int x_size, int y_size,
             }
         }
     }
+    Node* tempNode = goalNode;
+    int planLength = 1;
+    while(tempNode->parent != 0) {
+        planLength++;
+        tempNode = tempNode->parent;
+    }
     //printf("Reached goalJoint -- building plan of length %d.\n", goalNode->nodeNum);
-    *plan = (double**) malloc(goalNode->nodeNum * sizeof(double*));
-    *planlength = goalNode->nodeNum;
+    *plan = (double**) malloc(planLength * sizeof(double*));
+    *planlength = planLength;
 
+    //printf("startNode = [%f, %f, %f, %f, %f]\n",
+    //        startNode->joint[0], startNode->joint[1], startNode->joint[2],
+    //        startNode->joint[3], startNode->joint[4]);
     for (int i = *planlength - 1; i >= 0; i--) {
+        //printf("plan[%d] = [%f, %f, %f, %f, %f]\n",
+        //    i, goalNode->joint[0], goalNode->joint[1], goalNode->joint[2],
+        //        goalNode->joint[3], goalNode->joint[4]);
         (*plan)[i] = (double*) malloc(numofDOFs * sizeof(double));
         for(int j = 0; j < numofDOFs; j++){
             (*plan)[i][j] = goalNode->joint[j];
@@ -1050,7 +1070,7 @@ void mexFunction( int nlhs, mxArray *plhs[],
         plannerPRM(map,x_size,y_size, armstart_anglesV_rad, armgoal_anglesV_rad, numofDOFs, &plan, &planlength);
     } else if (planner_id == ALL) {
         printf("Running All Planners\n");
-        int numIterations = 1;
+        int numIterations = 20;
         
         double rrtPlanningTime = 0;
         int rrtNumNodes = 0;
@@ -1067,7 +1087,8 @@ void mexFunction( int nlhs, mxArray *plhs[],
         double prmPlanningTime = 0;
         int prmNumNodes = 0;
         double prmPlanQuality = 0;
-
+        
+        srand(time(NULL));
         int i = 1;
         while (i <= numIterations) {
             printf("Iteration %d\n", i);
@@ -1095,24 +1116,27 @@ void mexFunction( int nlhs, mxArray *plhs[],
             }
             printf("%f]\n", goal[numofDOFs-1]);
 
-            printf("Algorithm | planningTime | numNodes | planLength | planQuality\n");
+            printf("Running RRT\n");
             ExperimentResult rrtResult = plannerRRT(map,x_size,y_size, start, goal, numofDOFs, &plan, &planlength);
             if (rrtResult.planningTime == -1) {
                 printf("RRT took more than %d seconds, retrying iteration...\n\n", TIMELIMIT);
                 continue;
             }
+            printf("Running RRTConnect\n");
             ExperimentResult rrtConnectResult = plannerRRTConnect(map,x_size,y_size, start, goal, numofDOFs, &plan, &planlength);
             if (rrtConnectResult.planningTime == -1) {
                 printf("RRTConnect took more than %d seconds, retrying iteration...\n\n", TIMELIMIT);
                 continue;
             }
+            printf("Running RRTStar\n");
             ExperimentResult rrtStarResult = plannerRRTStar(map,x_size,y_size, start, goal, numofDOFs, &plan, &planlength);
             if (rrtStarResult.planningTime == -1) {
                 printf("RRTStar took more than %d seconds, retrying iteration...\n\n", TIMELIMIT);
                 continue;
             }
+            printf("Running PRM\n");
             ExperimentResult prmResult = plannerPRM(map,x_size,y_size, start, goal, numofDOFs, &plan, &planlength);
-            if (rrtStarResult == NULL) {
+            if (prmResult.planningTime == -1) {
                 printf("PRM took more than %d seconds, retrying iteration...\n\n", TIMELIMIT);
                 continue;
             }
